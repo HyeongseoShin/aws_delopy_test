@@ -10,8 +10,13 @@ description = 'Demo project for Spring Boot'
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
+		languageVersion = JavaLanguageVersion.of(21)
 	}
+}
+
+// -plain.jar 안 만들어지도록 내용 추가
+jar {
+	enabled = false
 }
 
 configurations {

@@ -11,4 +11,9 @@ public class TestController {
     public String hello() {
         return "EC2 접속 성공! 서버가 살아있습니다.";
     }
+
+    @GetMapping("/CDTest")
+    public String CDTest() {
+        return "CD 성공!! 수고하셨습니다.";
+    }
 }
