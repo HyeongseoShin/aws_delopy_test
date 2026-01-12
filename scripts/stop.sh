@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 
 PROJECT_ROOT="/home/ubuntu/app"
-PROJECT_NAME="demo-0.0.1-SNAPSHOT.jar" # 본인 프로젝트 jar 이름으로 수정 필요
-JAR_FILE="$PROJECT_ROOT/$PROJECT_NAME"
+JAR_FILE="$PROJECT_ROOT/demo-0.0.1-SNAPSHOT.jar" # 본인 프로젝트 jar 이름으로 수정 필요
 
 DEPLOY_LOG="$PROJECT_ROOT/deploy.log"
 
