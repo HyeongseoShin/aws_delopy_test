@@ -1,1 +1,39 @@
-spring.application.name=demo
+spring:
+  datasource:
+    # [핵심] 로컬에서 도커로 접속하므로 주소는 'localhost'입니다.
+    url: jdbc:postgresql://localhost:5432/${POSTGRES_DB}
+    username: ${POSTGRES_USER}         # .env에 적은 것과 동일하게
+    password: ${POSTGRES_PASSWORD} # .env에 적은 것과 동일하게
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true # 쿼리 로그 예쁘게 보기
+  kafka:
+    # [중요] IntelliJ에서 실행할 때는 localhost:9092로 접속
+    bootstrap-servers: localhost:9092
+
+    # 메시지를 보낼 때(Producer) 설정
+    producer:
+      # 키와 값을 어떤 형식으로 보낼지 (일단 가장 쉬운 문자열로 설정)
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+    # 메시지를 받을 때(Consumer) 설정
+    consumer:
+      group-id: my-group-1 # 컨슈머 그룹 ID (아무거나 영어로)
+      auto-offset-reset: latest # 가장 최근 메시지부터 읽기
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus # 프로메테우스가 볼 수 있게 허용
+  endpoint:
+    prometheus:
+      enabled: true
