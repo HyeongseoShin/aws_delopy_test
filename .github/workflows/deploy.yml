@@ -1,45 +1,33 @@
-name: Deploy to Amazon EC2
+name: Deploy to ECR & EC2
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
 
 env:
-  AWS_REGION: ap-northeast-2
-  S3_BUCKET_NAME: only4-github-actions-s3-bucket
-  CODE_DEPLOY_APPLICATION_NAME: my-codedeploy-app
-  CODE_DEPLOY_DEPLOYMENT_GROUP_NAME: my-codedeploy-deployment-group
-
-permissions:
-  contents: read
+  AWS_REGION: ap-northeast-2             # 한국 리전
+  ECR_REPOSITORY: only4-deploy           # 본인의 ECR 리포지토리 이름
+  ECR_REGISTRY: 959171912802.dkr.ecr.ap-northeast-2.amazonaws.com
 
 jobs:
-  deploy:
-    name: Deploy
+  build-and-push:
     runs-on: ubuntu-latest
-    environment: production
-
     steps:
-      # (1) 기본 체크아웃 (v4 사용)
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # (2) JDK 21 세팅 및 Gradle 캐싱 (v4 사용)
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '21'
-          cache: 'gradle' # Gradle 의존성 캐싱 활성화
+          distribution: 'temurin'
 
-      # (3) Gradle 실행 권한 부여 및 빌드
+      # 1. Gradle 빌드 (테스트 제외)
       - name: Build with Gradle
-        run: |
-          chmod +x ./gradlew
-          ./gradlew clean build -x test
+        run: ./gradlew build -x test
+        shell: bash
 
-      # (4) AWS 인증 (v4 사용)
+      # 2. AWS 자격 증명 설정
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -47,20 +35,61 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # (5) 빌드 결과물을 S3 버킷에 업로드
-      - name: Upload to AWS S3
-        run: |
-          aws deploy push \
-            --application-name ${{ env.CODE_DEPLOY_APPLICATION_NAME }} \
-            --ignore-hidden-files \
-            --s3-location s3://${{ env.S3_BUCKET_NAME }}/${{ github.sha }}.zip \
-            --source .
+      # 3. ECR 로그인
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      # (6) S3 버킷에 있는 파일을 대상으로 CodeDeploy 실행
-      - name: Deploy to AWS EC2 from S3
+      # 4. 도커 이미지 빌드 및 ECR 푸시
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: latest
         run: |
-          aws deploy create-deployment \
-            --application-name ${{ env.CODE_DEPLOY_APPLICATION_NAME }} \
-            --deployment-config-name CodeDeployDefault.AllAtOnce \
-            --deployment-group-name ${{ env.CODE_DEPLOY_DEPLOYMENT_GROUP_NAME }} \
-            --s3-location bucket=${{ env.S3_BUCKET_NAME }},key=${{ github.sha }}.zip,bundleType=zip
+          docker build -t ${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push ${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "image=${{ env.ECR_REGISTRY }}/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 5. 설정 파일들(docker-compose.yml 등)을 EC2로 전송
+      - name: Copy files to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # 보내고 싶은 파일들을 나열합니다.
+          source: "docker-compose-prod.yml,prometheus.yml"
+          target: "/home/ubuntu/app"
+          strip_components: 0 # 폴더 구조 없이 파일만 전송
+
+      # 6. EC2 접속 및 배포 실행
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/app
+            
+            # .env 파일 생성 (Secrets 값 주입)
+            echo "POSTGRES_DB=${{ secrets.ENV_POSTGRES_DB }}" > .env
+            echo "POSTGRES_USER=${{ secrets.ENV_POSTGRES_USER }}" >> .env
+            echo "POSTGRES_PASSWORD=${{ secrets.ENV_POSTGRES_PASSWORD }}" >> .env
+            
+            # ECR 로그인 (Docker가 이미지를 받을 수 있게)
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+            
+            # 최신 이미지 Pull 및 실행
+            docker compose -f docker-compose-prod.yml pull
+            docker compose -f docker-compose-prod.yml down
+            docker compose -f docker-compose-prod.yml up -d
+            docker image prune -f # 안 쓰는 구형 이미지 삭제 (용량 확보)
