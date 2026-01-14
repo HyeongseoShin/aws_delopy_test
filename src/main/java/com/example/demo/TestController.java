@@ -16,4 +16,9 @@ public class TestController {
     public String CDTest() {
         return "CD 성공!! 수고하셨습니다.";
     }
+
+    @GetMapping("/cicd-docker")
+    public String dockerTest() {
+        return "도커 이미지 CI/CD 성공!! 수고하셨습니다.";
+    }
 }
